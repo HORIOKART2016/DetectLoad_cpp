@@ -6,9 +6,13 @@
 using namespace std;
 using namespace cv;
 
-const string IMG_PATH = "./P7090787.JPG";
+const string IMG_PATH = "./P7090778.JPG";
 const float RESIZE_RATE = 0.3;
 
+/*
+ *	カラー画像のヒストグラム均一化
+ *	深度3ならなんでもOK
+ */
 void equalizeColorHist(Mat& src, Mat& dst)
 {
 	vector<Mat> planes(3);
@@ -28,6 +32,9 @@ void equalizeColorHist(Mat& src, Mat& dst)
 	merge(rgb, dst);
 }
 
+/*
+ *	指定範囲の画素値を平均する
+ */
 int calcAverage(Mat& src, Point center, Size size)
 {
 	int val = 0;
@@ -42,6 +49,9 @@ int calcAverage(Mat& src, Point center, Size size)
 	return val / (size.width*size.height);
 }
 
+/*
+ *	画像中で最大の画素値を返す
+ */
 int maxBrightness(Mat pic)
 {
 	int maxBrightness = 0;
@@ -55,7 +65,9 @@ int maxBrightness(Mat pic)
 	}
 	return maxBrightness;
 }
-
+/*
+ *  シグモイド関数に基づいてコントラスト調整
+ */
 Mat contrastSigmoid(Mat &pic)
 {
 	float gain = 50;
@@ -75,76 +87,95 @@ Mat contrastSigmoid(Mat &pic)
 	return p.reshape(0, pic.rows).clone();
 
 }
+
+/*
+ *	基準点の画素値に基づいて道幅を算出
+ *	色がごちゃごちゃしてたらダメ
+ *	
+ *	引数
+ *		Mat src : 検出対象画像（BGR）
+ *		int retLR : 返り値を格納する配列.[left, right]で返す.
+ *		Point center : 基準点.この画素値に基づき,ここから左右に幅を探索する.
+ *		Size size : 基準値を平均する範囲と,道幅探索するy方向の範囲
+ */
+void DetectLoadWidth(Mat src, int retLR[2], Point criteria, Size size = Size(10,10))
+{
+	Mat tmp;
+	// bgrのヒストグラム均一化
+	equalizeColorHist(src, tmp);
+
+	Mat pic;
+	// hsvのhのみ抽出
+	cvtColor(tmp, pic, CV_BGR2HSV);
+	vector<Mat> hsv(3);
+	split(pic, hsv);
+	// hのヒストグラム均一化
+	equalizeHist(hsv[0], pic);
+
+	// 基準となる画素値を算出
+	int criteria_val = calcAverage(pic, criteria, size);
+	// 基準値に対する差分計算
+	int line_height = size.height;
+	Mat line_img(line_height, pic.cols - size.width, CV_8U);
+	for (int y = criteria.y - line_height / 2; y < criteria.y + (int)(line_height / 2.0 + 0.5); y++)
+	{
+		for (int x = size.width / 2; x < pic.cols - size.width / 2; x++)
+		{
+			//int val = calcAverage(pic, Point(x, y), size) - criteria_val;
+			int val = pic.data[y * pic.cols + x] - criteria_val;
+			line_img.data[(y - criteria.y + line_height / 2) * line_img.cols + x - size.width / 2] = val >= 0 ? val : 256 + val;
+		}
+	}
+	Mat result = contrastSigmoid(line_img); // 2値化でいいかも
+
+	// ノイズ除去
+	morphologyEx(result, line_img, MORPH_CLOSE, Mat(), Point(-1, -1), 3);
+
+	// 検出対象の幅を算出
+	retLR[0] = retLR[1] = 0;
+	for (int y = 0; y < line_img.rows; y++)
+	{
+		int x;
+
+		for (x = criteria.x; x > 0; x--)
+			if (line_img.data[y * line_img.cols + x] < 200)
+				break;
+		retLR[0] += x;
+
+		for (x = criteria.x; x < line_img.cols; x++)
+			if (line_img.data[y * line_img.cols + x] < 200)
+				break;
+		retLR[1] += x;
+	}
+	retLR[1] = retLR[1] / line_img.rows + size.width / 2; // あとで外れ値対策する(かも)
+	retLR[0] = retLR[0] / line_img.rows + size.width / 2;
+}
+
 void main()
 {
 	Mat src = imread(IMG_PATH, 1);
 	Mat original_image;
 	resize(src, original_image, Size(), RESIZE_RATE, RESIZE_RATE);
-	Mat tmp;
-	//equalizeHist(src, tmp);
-	//src = tmp.clone();
 
-	equalizeColorHist(src, tmp);
-	src = tmp.clone();
-
-	cvtColor(src, tmp, CV_BGR2HSV);
-	vector<Mat> hsv(3);
-	split(tmp, hsv);
-	src = hsv[0].clone();
-	equalizeHist(src, tmp);
-	src = tmp.clone();
-
+	cout << "unko" << endl;
+	
 	Mat pic;
+	// resize
 	resize(src, pic, Size(), RESIZE_RATE, RESIZE_RATE);
 
+	Point criteria(pic.cols / 2, pic.rows / 2);
 	Size size(10, 10);
-	Point center(pic.cols / 2, pic.rows / 2 + 110);
-	int center_val = calcAverage(pic, center, size);
-	int line_height = 10;
-	Mat line_img(line_height, pic.cols - size.width, CV_8U);
-	for (int y = center.y - line_height / 2; y < center.y + (int)(line_height / 2.0 + 0.5); y++)
-	{
-		for (int x = size.width / 2; x < pic.cols - size.width / 2; x++)
-		{
-			//int val = calcAverage(pic, Point(x, y), size) - center_val;
-			int val = pic.data[y * pic.cols + x] - center_val;
-			line_img.data[(y - center.y + line_height / 2) * line_img.cols + x - size.width / 2] = val >= 0 ? val : 256 + val;
-		}
-	}
-	Mat result = contrastSigmoid(line_img); // 2値化でいいかも
+	int widthLR[2];
+	DetectLoadWidth(pic, widthLR, criteria);
 
-	morphologyEx(result, line_img, MORPH_CLOSE, Mat());
-	int right_x = 0;
-	int left_x = 0;
-	for (int y = 0; y < line_img.rows; y++)
-	{
-		for (int x = center.x; x < line_img.cols; x++)
-		{
-			if (line_img.data[y * line_img.cols + x] < 200)
-			{
-				right_x += x;
-				break;
-			}
-		}
-		for (int x = center.x; x > 0; x--)
-		{
-			if (line_img.data[y * line_img.cols + x] < 200)
-			{
-				left_x += x;
-				break;
-			}
-		}
-	}
-	right_x = right_x / line_img.rows + size.width / 2; // あとで外れ値対策する
-	left_x = left_x / line_img.rows + size.width / 2;
+	cout << widthLR[0] << "," << widthLR[1] << endl;;
 
-	cout << left_x << "," << right_x << endl;;
+	// 描画
+	line(original_image, Point(0, criteria.y - size.height / 2), Point(original_image.cols, criteria.y - size.height / 2), Scalar(0, 0, 255));
+	line(original_image, Point(0, criteria.y + size.height / 2), Point(original_image.cols, criteria.y + size.height / 2), Scalar(0, 0, 255));
 
-	line(original_image, Point(0, center.y - line_height / 2), Point(original_image.cols, center.y - line_height / 2), Scalar(0, 0, 255));
-	line(original_image, Point(0, center.y + line_height / 2), Point(original_image.cols, center.y + line_height / 2), Scalar(0, 0, 255));
-
-	line(original_image, Point(right_x, 0), Point(right_x, original_image.rows), Scalar(0, 0, 255));
-	line(original_image, Point(left_x, 0), Point(left_x, original_image.rows), Scalar(0, 0, 255));
+	line(original_image, Point(widthLR[1], 0), Point(widthLR[1], original_image.rows), Scalar(0, 0, 255));
+	line(original_image, Point(widthLR[0], 0), Point(widthLR[0], original_image.rows), Scalar(0, 0, 255));
 
 	imshow(IMG_PATH, original_image);
 	waitKey(0);
