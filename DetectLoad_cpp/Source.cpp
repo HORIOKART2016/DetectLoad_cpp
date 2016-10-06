@@ -89,72 +89,128 @@ Mat contrastSigmoid(Mat &pic)
 }
 
 /*
- *	基準点の画素値に基づいて道幅を算出
- *	色がごちゃごちゃしてたらダメ
+*	基準点の画素値に基づいて道幅を算出
+*	色がごちゃごちゃしてたらダメ
+*	(面倒だから縦横で関数分けました.気が向いたらまとめます)
+*
+*	引数
+*		Mat src : 検出対象画像（BGR）
+*		int retLR, retTB : 返り値を格納する配列.[left, right]or[top, bottom]で返す.
+*		Point center : 基準点.この画素値に基づき,ここから左右に幅を探索する.
+*		Size size : 基準値を平均する範囲と,道幅探索する範囲
+*/
+void getHeight(Mat src, int retTB[2], Point criteria, Size size = Size(10, 10))
+{
+	// 基準となる画素値を算出
+	int criteria_val = calcAverage(src, criteria, size);
+
+	// 基準値に対する差分計算
+	int calc_height = src.rows - size.height;
+	int calc_width = size.width;
+	Mat diff_img(calc_height, calc_width, CV_8U);
+	for (int y = size.height / 2; y < src.rows - size.height / 2; y++)
+	{
+		for (int x = criteria.x - calc_width / 2; x < criteria.x + (int)(calc_width / 2.0 + 0.5); x++)
+		{
+			//int val = calcAverage(pic, Point(x, y), size) - criteria_val;
+			int val = src.data[y * src.cols + x] - criteria_val;
+			diff_img.data[(y - size.height / 2) * diff_img.cols + x - criteria.x + calc_width / 2] = abs(val);
+		}
+	}
+	Mat result = contrastSigmoid(diff_img); // 2値化でいいかも
+
+	// ノイズ除去
+	morphologyEx(result, diff_img, MORPH_OPEN, Mat(), Point(-1, -1), 3);
+
+	// 検出対象の幅を算出
+	retTB[0] = retTB[1] = 0;
+	for (int x = 0; x < diff_img.cols; x++)
+	{
+		int y;
+
+		for (y = criteria.y; y > 0; y--)
+			if (diff_img.data[y * diff_img.cols + x] > 200)
+				break;
+		retTB[0] += y;
+
+		for (y = criteria.y; y < diff_img.rows; y++)
+			if (diff_img.data[y * diff_img.cols + x] > 200)
+				break;
+		retTB[1] += y;
+	}
+	retTB[1] = retTB[1] / diff_img.cols + size.height / 2; // あとで外れ値対策する(かも)
+	retTB[0] = retTB[0] / diff_img.cols + size.height / 2;
+}
+
+void getWidth(Mat src, int retLR[2], Point criteria, Size size = Size(10, 10))
+{
+	// 基準となる画素値を算出
+	int criteria_val = calcAverage(src, criteria, size);
+
+	// 基準値に対する差分計算
+	int calc_height = size.height;
+	int calc_width = src.cols - size.width;
+	Mat diff_img(calc_height, calc_width, CV_8U);
+	for (int y = criteria.y - calc_height / 2; y < criteria.y + (int)(calc_height / 2.0 + 0.5); y++)
+	{
+		for (int x = size.width / 2; x < src.cols - size.width / 2; x++)
+		{
+			//int val = calcAverage(pic, Point(x, y), size) - criteria_val;
+			int val = src.data[y * src.cols + x] - criteria_val;
+			diff_img.data[(y - criteria.y + calc_height / 2) * diff_img.cols + x - size.width / 2] = abs(val);
+		}
+	}
+	Mat result = contrastSigmoid(diff_img); // 2値化でいいかも
+
+	// ノイズ除去
+	morphologyEx(result, diff_img, MORPH_OPEN, Mat(), Point(-1, -1), 3);
+
+	// 検出対象の幅を算出
+	retLR[0] = retLR[1] = 0;
+	for (int y = 0; y < diff_img.rows; y++)
+	{
+		int x;
+
+		for (x = criteria.x; x > 0; x--)
+			if (diff_img.data[y * diff_img.cols + x] > 200)
+				break;
+		retLR[0] += x;
+
+		for (x = criteria.x; x < diff_img.cols; x++)
+			if (diff_img.data[y * diff_img.cols + x] > 200)
+				break;
+		retLR[1] += x;
+	}
+	retLR[1] = retLR[1] / diff_img.rows + size.width / 2; // あとで外れ値対策する(かも)
+	retLR[0] = retLR[0] / diff_img.rows + size.width / 2;
+}
+
+/*
+ *	ヒストグラム均一化した色相画像を返す
  *	
  *	引数
- *		Mat src : 検出対象画像（BGR）
- *		int retLR : 返り値を格納する配列.[left, right]で返す.
- *		Point center : 基準点.この画素値に基づき,ここから左右に幅を探索する.
- *		Size size : 基準値を平均する範囲と,道幅探索するy方向の範囲
+ *		Mat& src : 検出対象画像（BGR）
+ *		Mat& dst : 結果格納用
  */
-void DetectLoadWidth(Mat src, int retLR[2], Point criteria, Size size = Size(10,10))
+void getHueImage(Mat& src, Mat& dst)
 {
 	Mat tmp;
 	// bgrのヒストグラム均一化
 	equalizeColorHist(src, tmp);
 
-	Mat pic;
 	// hsvのhのみ抽出
-	cvtColor(tmp, pic, CV_BGR2HSV);
+	cvtColor(tmp, dst, CV_BGR2HSV);
 	vector<Mat> hsv(3);
-	split(pic, hsv);
+	split(dst, hsv);
 	// hのヒストグラム均一化
-	equalizeHist(hsv[0], pic);
-
-	// 基準となる画素値を算出
-	int criteria_val = calcAverage(pic, criteria, size);
-	// 基準値に対する差分計算
-	int line_height = size.height;
-	Mat line_img(line_height, pic.cols - size.width, CV_8U);
-	for (int y = criteria.y - line_height / 2; y < criteria.y + (int)(line_height / 2.0 + 0.5); y++)
-	{
-		for (int x = size.width / 2; x < pic.cols - size.width / 2; x++)
-		{
-			//int val = calcAverage(pic, Point(x, y), size) - criteria_val;
-			int val = pic.data[y * pic.cols + x] - criteria_val;
-			line_img.data[(y - criteria.y + line_height / 2) * line_img.cols + x - size.width / 2] = val >= 0 ? val : 256 + val;
-		}
-	}
-	Mat result = contrastSigmoid(line_img); // 2値化でいいかも
-
-	// ノイズ除去
-	morphologyEx(result, line_img, MORPH_CLOSE, Mat(), Point(-1, -1), 3);
-
-	// 検出対象の幅を算出
-	retLR[0] = retLR[1] = 0;
-	for (int y = 0; y < line_img.rows; y++)
-	{
-		int x;
-
-		for (x = criteria.x; x > 0; x--)
-			if (line_img.data[y * line_img.cols + x] < 200)
-				break;
-		retLR[0] += x;
-
-		for (x = criteria.x; x < line_img.cols; x++)
-			if (line_img.data[y * line_img.cols + x] < 200)
-				break;
-		retLR[1] += x;
-	}
-	retLR[1] = retLR[1] / line_img.rows + size.width / 2; // あとで外れ値対策する(かも)
-	retLR[0] = retLR[0] / line_img.rows + size.width / 2;
+	equalizeHist(hsv[0], dst);
 }
 
 void main()
 {
+	// 画像読み込み
 	Mat src = imread(IMG_PATH, 1);
-	Mat original_image;
+	Mat original_image; // 元画像バックアップ
 	resize(src, original_image, Size(), RESIZE_RATE, RESIZE_RATE);
 
 	cout << "unko" << endl;
@@ -163,19 +219,32 @@ void main()
 	// resize
 	resize(src, pic, Size(), RESIZE_RATE, RESIZE_RATE);
 
-	Point criteria(pic.cols / 2, pic.rows / 2);
+	// 前処理して色相画像に変換
+	Mat hue_img;
+	getHueImage(pic, hue_img);
+
+	// 縦横幅取得
+	Point criteria(pic.cols / 2, pic.rows / 2); // 基準点
 	Size size(10, 10);
-	int widthLR[2];
-	DetectLoadWidth(pic, widthLR, criteria);
+	int widthLR[2], heightTB[2]; // Left Right, Top Bottom
+	getWidth(hue_img, widthLR, criteria, size);
+	getHeight(hue_img, heightTB, criteria, size);
 
 	cout << widthLR[0] << "," << widthLR[1] << endl;;
 
-	// 描画
+	// 横幅描画
 	line(original_image, Point(0, criteria.y - size.height / 2), Point(original_image.cols, criteria.y - size.height / 2), Scalar(0, 0, 255));
 	line(original_image, Point(0, criteria.y + size.height / 2), Point(original_image.cols, criteria.y + size.height / 2), Scalar(0, 0, 255));
 
 	line(original_image, Point(widthLR[1], 0), Point(widthLR[1], original_image.rows), Scalar(0, 0, 255));
 	line(original_image, Point(widthLR[0], 0), Point(widthLR[0], original_image.rows), Scalar(0, 0, 255));
+
+	// 縦幅描画
+	line(original_image, Point(0, heightTB[0]), Point(original_image.cols, heightTB[0]), Scalar(255, 0, 255));
+	line(original_image, Point(0, heightTB[1]), Point(original_image.cols, heightTB[1]), Scalar(255, 0, 255));
+
+	line(original_image, Point(criteria.x - size.width / 2, 0), Point(criteria.x - size.width / 2, original_image.rows), Scalar(255, 0, 255));
+	line(original_image, Point(criteria.x + size.width / 2, 0), Point(criteria.x + size.width / 2, original_image.rows), Scalar(255, 0, 255));
 
 	imshow(IMG_PATH, original_image);
 	waitKey(0);
