@@ -209,12 +209,18 @@ void getHueImage(Mat& src, Mat& dst)
 
 void main()
 {
+	
+	VideoCapture cap(0);
+	
+	if (!cap.isOpened()){
+		cout << "camera open error\n";
+		return;
+	}
 
 	LARGE_INTEGER freq;
 	LARGE_INTEGER start, now;
 
 	QueryPerformanceFrequency(&freq);
-
 	QueryPerformanceCounter(&start);
 
 	// 画像読み込み
@@ -222,6 +228,7 @@ void main()
 	Mat src;
 	Mat original_image; // 元画像バックアップ
 	
+	cap >> src;
 	
 	resize(src, original_image, Size(), RESIZE_RATE, RESIZE_RATE);
 	
@@ -244,6 +251,9 @@ void main()
 	getHeight(hue_img, heightTB, criteria, size);
 
 	cout << widthLR[0] << "," << widthLR[1] << endl;;
+
+	QueryPerformanceCounter(&now);
+	printf("time:%5.5lf", (double)(((now.QuadPart - start.QuadPart) * 1000 / freq.QuadPart)));
 
 	// 横幅描画
 	line(original_image, Point(0, criteria.y - size.height / 2), Point(original_image.cols, criteria.y - size.height / 2), Scalar(0, 0, 255));
