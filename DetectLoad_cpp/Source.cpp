@@ -2,6 +2,7 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/opencv_lib.hpp>
 #include <string>
+#include <windows.h>
 
 using namespace std;
 using namespace cv;
@@ -208,10 +209,22 @@ void getHueImage(Mat& src, Mat& dst)
 
 void main()
 {
+
+	LARGE_INTEGER freq;
+	LARGE_INTEGER start, now;
+
+	QueryPerformanceFrequency(&freq);
+
+	QueryPerformanceCounter(&start);
+
 	// 画像読み込み
-	Mat src = imread(IMG_PATH, 1);
+	//Mat src = imread(IMG_PATH, 1);
+	Mat src;
 	Mat original_image; // 元画像バックアップ
+	
+	
 	resize(src, original_image, Size(), RESIZE_RATE, RESIZE_RATE);
+	
 
 	cout << "unko" << endl;
 	
