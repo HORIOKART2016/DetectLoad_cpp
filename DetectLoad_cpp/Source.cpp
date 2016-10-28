@@ -7,8 +7,10 @@
 using namespace std;
 using namespace cv;
 
-const string IMG_PATH = "./P7090778.JPG";
-const float RESIZE_RATE = 0.3;
+const string IMG_PATH = "P7090822.JPG";
+const float RESIZE_RATE = 1.0;
+
+int mode = 1;		//0：カメラ　1：JPG
 
 /*
  *	カラー画像のヒストグラム均一化
@@ -209,28 +211,44 @@ void getHueImage(Mat& src, Mat& dst)
 
 void main()
 {
-	
-	VideoCapture cap(0);
-	
-	if (!cap.isOpened()){
-		cout << "camera open error\n";
-		return;
-	}
+
 
 	LARGE_INTEGER freq;
 	LARGE_INTEGER start, now;
 
 	QueryPerformanceFrequency(&freq);
 	QueryPerformanceCounter(&start);
-
-	// 画像読み込み
-	//Mat src = imread(IMG_PATH, 1);
+	
 	Mat src;
 	Mat original_image; // 元画像バックアップ
+
+	// 画像読み込み
+	if (mode == 0){
+		VideoCapture cap(0);
+
+		if (!cap.isOpened()){
+				cout << "camera open error\n";
+				return;
+		}
+		Sleep(1500);
+		cap >> src;
+		original_image = src;
+	}
+
+	else if (mode == 1){
+		src = imread(IMG_PATH, 1);
+		unsigned int height, width;
+		height = src.rows;
+		width = src.cols;
+		cout << "width : " << width << endl;
+		cout << "height : " << height << endl;
+		resize(src, original_image, Size(), (int)640/width, (int)480/height);
+	}
+
 	
-	cap >> src;
 	
-	resize(src, original_image, Size(), RESIZE_RATE, RESIZE_RATE);
+	
+	
 	
 
 	cout << "unko" << endl;
